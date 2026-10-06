@@ -1,179 +1,161 @@
-let spots = [];
-let selectedMinutes = 3;
+const REFRESH_MS = 3000;   // how often the street re-checks the server
 
-const statusLabel = {
-    available: "Available now",
-    occupied: "Occupied",
-    leaving_soon: "Leaving soon"
-};
+let bays = [];             // [{id, status}] from /api/bays
+let mode = "look";         // "look" or "leave"
+let selectedId = null;     // the bay the user tapped
+let myBayId = null;        // the bay this user parked in
+let notice = "";           // one-off message shown in the sheet
+let lastDrawn = "";
 
-async function loadAll() {
-    await Promise.all([loadSpots(), loadProfile()]);
-}
+const $ = id => document.getElementById(id);
 
-async function loadSpots() {
-    const response = await fetch("/api/spots");
-    spots = await response.json();
-    renderSpots();
-    renderMap();
-    populateSpotSelect();
-
-    document.getElementById("availableCount").textContent =
-        spots.filter(s => s.status === "available").length;
-
-    document.getElementById("leavingCount").textContent =
-        spots.filter(s => s.status === "leaving_soon").length;
-}
-
-async function loadProfile() {
-    const response = await fetch("/api/profile");
-    const profile = await response.json();
-    document.getElementById("pointsSidebar").textContent = `${profile.points} ParkPoints`;
-    document.getElementById("helpedCount").textContent = profile.helped_drivers;
-}
-
-function renderMap() {
-    const map = document.getElementById("map");
-    map.querySelectorAll(".map-pin").forEach(el => el.remove());
-
-    spots.forEach(spot => {
-        const pin = document.createElement("button");
-        pin.className = `map-pin ${spot.status}`;
-        pin.style.left = `${spot.x}%`;
-        pin.style.top = `${spot.y}%`;
-        pin.title = `${spot.id} — ${spot.street}`;
-        pin.innerHTML = `<span>${spot.status === "leaving_soon" ? spot.minutes + "m" : "P"}</span>`;
-        map.appendChild(pin);
-    });
-}
-
-function renderSpots() {
-    const list = document.getElementById("spotList");
-    const priority = { leaving_soon: 0, available: 1, occupied: 2 };
-
-    list.innerHTML = [...spots]
-        .sort((a, b) => priority[a.status] - priority[b.status])
-        .map(spot => `
-            <div class="spot">
-                <i class="status-icon ${spot.status === "leaving_soon" ? "leaving" : spot.status}"></i>
-                <div>
-                    <strong>${spot.street}</strong>
-                    <small>${spot.id} · ${spot.section}</small>
-                </div>
-                <span class="status-text ${spot.status}">
-                    ${spot.status === "leaving_soon" ? `${spot.minutes} min` : statusLabel[spot.status]}
-                </span>
-                ${spot.status === "leaving_soon" ? `
-                    <button class="secondary-button" onclick="completePing(${spot.ping_id})">Confirm left</button>
-                ` : ""}
-            </div>
-        `).join("");
-}
-
-function populateSpotSelect() {
-    const select = document.getElementById("spotSelect");
-    const usable = spots.filter(s => s.status === "occupied");
-    select.innerHTML = usable.map(s =>
-        `<option value="${s.id}">${s.id} — ${s.street}</option>`
-    ).join("");
-}
-
-async function createPing() {
-    const spotId = document.getElementById("spotSelect").value;
-    if (!spotId) {
-        alert("Choose an occupied parking bay first.");
-        return;
-    }
-
-    const response = await fetch("/api/pings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spot_id: spotId, minutes: selectedMinutes })
-    });
-
+async function post(path) {
+    const response = await fetch(path, { method: "POST" });
     const data = await response.json();
-    if (!response.ok) {
-        alert(data.error || "Could not create ping");
-        return;
-    }
-
-    closeModal();
-    await loadSpots();
+    return response.ok ? "" : data.error;
 }
 
-async function completePing(pingId) {
-    const response = await fetch(`/api/pings/${pingId}/complete`, { method: "PATCH" });
-    const data = await response.json();
-    if (!response.ok) {
-        alert(data.error || "Could not complete ping");
-        return;
+/* ---------- data ---------- */
+
+async function loadBays() {
+    const response = await fetch("/api/bays");
+    const latest = await response.json();
+
+    // The "ping": a bay that was taken a moment ago is free now. Point the looking driver at it.
+    const opened = latest.find(bay =>
+        bay.status === "free" && bays.some(old => old.id === bay.id && old.status === "occupied"));
+    if (opened && mode === "look") {
+        selectedId = opened.id;
+        notice = `Bay ${opened.id} just opened up`;
     }
-    await loadAll();
+
+    bays = latest;
+    render();
 }
 
-async function runPrediction() {
-    const hour = Number(document.getElementById("predictionHour").value);
-    const day = Number(document.getElementById("predictionDay").value);
+async function parkHere(bayId) {
+    notice = await post(`/api/bays/${bayId}/park`);
+    if (!notice) myBayId = bayId;
+    await loadBays();
+}
 
-    // The backend only uses fields that exist in model_meta.json.
-    // Extra JSON fields are harmless and ignored.
-    const payload = {
-        hour: hour,
-        day_of_week: day,
-        is_weekend: day >= 5 ? 1 : 0,
-        parking_lot_section: "Zone A",
-        parking_section: "Zone A",
-        section: "Zone A",
-        traffic_conditions: "Moderate",
-        nearby_traffic_conditions: "Moderate",
-        weather_conditions: "Clear",
-        weather_condition: "Clear",
-        user_type: "Registered",
-        vehicle_type: "Car",
-        parking_spot_size: "Standard",
-        reserved_status: "No"
+async function leaveBay(bayId) {
+    const error = await post(`/api/bays/${bayId}/leave`);
+    notice = error || `Bay ${bayId} is now free for other drivers`;
+    if (!error && myBayId === bayId) myBayId = null;
+    selectedId = null;
+    await loadBays();
+}
+
+/* ---------- drawing ---------- */
+
+function bayButton(bay) {
+    const classes = ["bay", bay.status];
+    if (bay.id === selectedId) classes.push("selected");
+    if (bay.id === myBayId) classes.push("mine");
+    return `<button class="${classes.join(" ")}" data-bay="${bay.id}">${bay.id}</button>`;
+}
+
+function sheetHtml() {
+    const bay = bays.find(b => b.id === selectedId);
+    const freeCount = bays.filter(b => b.status === "free").length;
+
+    if (!bays.length) return `<h2>No parking data yet</h2><p>Put the Kaggle CSV in the data folder and restart.</p>`;
+
+    if (mode === "look") {
+        if (!bay) {
+            return freeCount
+                ? `<h2>${freeCount} bays free</h2><p>Tap a green bay to take it.</p>`
+                : `<h2>No free bays right now</h2><p>This screen updates the moment someone leaves.</p>`;
+        }
+        if (bay.status === "free") {
+            return `<span class="badge free">FREE</span><h2>Bay ${bay.id}</h2>
+                    <button class="button" data-action="park">I parked here</button>`;
+        }
+        return `<span class="badge">TAKEN</span><h2>Bay ${bay.id}</h2><p>Someone is parked here.</p>`;
+    }
+
+    // mode === "leave"
+    if (!bay) return `<h2>Which bay are you in?</h2><p>Tap your bay on the street.</p>`;
+    if (bay.status === "free") return `<h2>Bay ${bay.id} is already free</h2><p>Tap the bay you are parked in.</p>`;
+    return `<span class="badge">YOUR BAY</span><h2>Leaving bay ${bay.id}?</h2>
+            <p>Drivers who are looking will see it turn green.</p>
+            <button class="button" data-action="leave">I'm leaving</button>`;
+}
+
+function render() {
+    const html = {
+        // First half of the bays above the road, second half below it.
+        topRow: bays.slice(0, Math.ceil(bays.length / 2)).map(bayButton).join(""),
+        bottomRow: bays.slice(Math.ceil(bays.length / 2)).map(bayButton).join(""),
+        legend: `<span><i class="free"></i>${bays.filter(b => b.status === "free").length} free</span>
+                 <span><i class="occupied"></i>${bays.filter(b => b.status === "occupied").length} taken</span>`,
+        sheet: (notice ? `<p class="notice">${notice}</p>` : "") + sheetHtml()
     };
 
-    const resultBox = document.getElementById("predictionResult");
-    resultBox.textContent = "Checking historical parking patterns…";
+    // Skip the redraw when nothing changed, so a button is never replaced mid-tap.
+    const drawing = JSON.stringify(html) + mode;
+    if (drawing === lastDrawn) return;
+    lastDrawn = drawing;
 
-    const response = await fetch("/api/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    });
-    const data = await response.json();
-
-    if (!data.trained) {
-        resultBox.textContent = data.message;
-        return;
-    }
-
-    const percent = Math.round(data.availability_probability * 100);
-    resultBox.innerHTML = `
-        <strong>${percent}% estimated availability</strong><br>
-        ${data.recommendation}
-    `;
+    for (const id in html) $(id).innerHTML = html[id];
+    document.querySelectorAll("#modeSwitch button").forEach(button =>
+        button.classList.toggle("on", button.dataset.mode === mode));
 }
 
-function openModal() {
-    document.getElementById("leaveModal").classList.remove("hidden");
-}
-function closeModal() {
-    document.getElementById("leaveModal").classList.add("hidden");
+async function loadOutlook() {
+    const response = await fetch("/api/outlook");
+    const hours = await response.json();
+    if (!hours.length) return;
+
+    const now = new Date().getHours();
+    const current = hours.find(h => h.hour === now) || hours[0];
+    const quietest = hours.reduce((a, b) => (b.occupied_pct < a.occupied_pct ? b : a));
+
+    $("outlook").innerHTML = `
+        <div class="chips">
+            <span class="chip">Usually ${current.occupied_pct}% full at ${current.hour}:00</span>
+            <span class="chip">Quietest at ${quietest.hour}:00</span>
+        </div>
+        <div class="bars">${hours.map(h => `
+            <i class="${h.hour === current.hour ? "on" : ""}" style="height:${h.occupied_pct}%"
+               title="${h.hour}:00 - ${h.occupied_pct}% full"></i>`).join("")}
+        </div>
+        <p>How full parking usually is at each hour of the day, from the dataset.</p>`;
 }
 
-document.getElementById("openLeaveModal").addEventListener("click", openModal);
-document.getElementById("closeLeaveModal").addEventListener("click", closeModal);
-document.getElementById("sendPing").addEventListener("click", createPing);
-document.getElementById("predictButton").addEventListener("click", runPrediction);
+/* ---------- clicks ---------- */
 
-document.querySelectorAll(".time-options button").forEach(button => {
-    button.addEventListener("click", () => {
-        document.querySelectorAll(".time-options button").forEach(b => b.classList.remove("selected"));
-        button.classList.add("selected");
-        selectedMinutes = Number(button.dataset.minutes);
-    });
+document.querySelector(".street").addEventListener("click", event => {
+    const button = event.target.closest("[data-bay]");
+    if (!button) return;
+    selectedId = Number(button.dataset.bay);
+    notice = "";
+    render();
 });
 
-loadAll();
+$("sheet").addEventListener("click", event => {
+    const action = event.target.dataset.action;
+    if (action === "park") parkHere(selectedId);
+    if (action === "leave") leaveBay(selectedId);
+});
+
+document.querySelectorAll("#modeSwitch button").forEach(button =>
+    button.addEventListener("click", () => {
+        mode = button.dataset.mode;
+        selectedId = mode === "leave" ? myBayId : null;   // leaving starts from the bay you parked in
+        notice = "";
+        render();
+    }));
+
+$("resetButton").addEventListener("click", async () => {
+    await post("/api/reset");
+    selectedId = myBayId = null;
+    notice = "";
+    bays = [];
+    await loadBays();
+});
+
+setInterval(loadBays, REFRESH_MS);
+loadBays();
+loadOutlook();

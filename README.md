@@ -5,11 +5,10 @@
 **Target user:** drivers looking for public/street parking in a busy urban area.
 
 **Solution:** ParkPing combines:
-1. historical parking data -> estimate parking pressure,
-2. community "I'm leaving" pings -> warn nearby drivers before a bay becomes free,
-3. reward points -> encourage drivers to contribute useful pings.
+1. historical parking data -> show how busy a car park usually is at each hour,
+2. community "I'm leaving" pings -> warn nearby drivers before a bay becomes free.
 
-> Important: This is a student prototype. Demo parking bays are illustrative and are not official Penang Smart Parking / MBPP data.
+> Important: This is a student prototype. Each bay's starting state and the hourly pattern are read from the Kaggle dataset. They are not live or official Penang Smart Parking / MBPP data.
 
 ---
 
@@ -22,15 +21,11 @@ Browser
   v
 Flask (app.py)
   |\
-  | \--> SQLite: pings + demo reward points
+  | \--> SQLite: current state of every bay (free / occupied)
   |
-  \----> saved scikit-learn model (model.joblib)
-             ^
-             |
-       ml/train_model.py
-             ^
-             |
-        Kaggle CSV
+  |----> Kaggle CSV: each bay's starting state + the hourly pattern
+  |
+  \----> saved scikit-learn model (model.joblib)   <- ml/train_model.py <- Kaggle CSV
 ```
 
 ### Plain-English translation
@@ -39,8 +34,8 @@ Flask (app.py)
 - **CSS** = how the page looks.
 - **JavaScript** = what happens when the user clicks.
 - **Flask** = receives requests from the browser and decides what to do.
-- **SQLite** = remembers pings and points.
-- **pandas** = reads/cleans the CSV.
+- **SQLite** = remembers the current state of every bay.
+- **pandas** = reads/cleans the CSV and works out the hourly pattern.
 - **scikit-learn** = learns patterns from historical parking data.
 - **joblib** = saves/loads the trained model.
 
@@ -77,7 +72,7 @@ Open:
 http://127.0.0.1:5000
 ```
 
-At this point the UI + parking ping workflow already works in demo mode.
+The app needs the Kaggle CSV in `data/` (next section). Without it the page loads but has no car parks to show.
 
 ---
 
@@ -115,34 +110,30 @@ model.joblib
 model_meta.json
 ```
 
-Restart Flask and the "Historical Model" card can call the model.
+`POST /api/predict` can then serve the model. The page does not call it yet; connect it once the notebook analysis is reviewed.
 
 ---
 
 ## 4. The one workflow you MUST be able to explain
 
-### A. Driver taps "I'm leaving"
+### A. One driver leaves, another driver finds the bay
 
-1. `index.html` contains the button.
-2. `app.js` listens for the click.
-3. JavaScript sends a `POST /api/pings`.
-4. Flask receives the JSON.
-5. Flask inserts the ping into SQLite.
-6. Frontend requests `/api/spots` again.
-7. That bay changes from grey "occupied" to orange "leaving soon".
+1. The leaving driver switches to "I'm leaving" and taps their bay on the street.
+2. `app.js` sends `POST /api/bays/<id>/leave`.
+3. Flask (`set_status`) changes that bay from `occupied` to `free` in SQLite.
+4. Every few seconds each open page asks `GET /api/bays` again.
+5. The looking driver's page sees a bay that was taken is now free, turns it green and shows "Bay 4 just opened up".
+6. They tap "I parked here" -> `POST /api/bays/<id>/park` -> the bay is occupied again.
 
-### B. Driver asks for parking outlook
+Demo tip: open the app in two browser windows, one as each driver.
 
-1. User enters hour/day.
-2. JavaScript sends JSON to `POST /api/predict`.
-3. Flask loads the saved model.
-4. Flask converts JSON into a one-row pandas DataFrame.
-5. The scikit-learn pipeline performs preprocessing.
-6. Decision tree returns occupied probability.
-7. Flask converts it to availability probability.
-8. Browser displays a useful recommendation.
+### B. Where the dataset shows up in the app
 
-If you can explain those 8 steps, you can explain the core application.
+1. On first start, `seed_bays()` reads the Kaggle CSV and gives each bay its most recent `Occupancy_Status`.
+2. `GET /api/outlook` groups the CSV by hour and returns the share of rows that were "Occupied".
+3. The browser draws one bar per hour and highlights the current hour.
+
+If you can explain those steps, you can explain the core application.
 
 ---
 
@@ -189,17 +180,16 @@ Your model should mainly use information plausibly known before/during the parki
 - Kaggle dataset analysis
 - trained ML model
 - Flask API
-- parking ping creation
-- status change
-- points stored in SQLite
+- "I'm leaving" pings and bay status changes stored in SQLite
+- hourly pattern calculated from the dataset
 - frontend/backend communication
 
 ### Simulated
-- official Penang parking bay locations
+- the street itself (bay states come from the Kaggle dataset, not George Town)
+- knowing which bay a driver is in (they tap it; a real system would use sensors or GPS)
 - real PSP integration
 - real MBPP sensors
 - real push notifications
-- actual ZUS partnership/vouchers
 - production GPS tracking
 
 Never claim simulated parts are real integrations.
@@ -241,7 +231,7 @@ git push
 
 ```powershell
 git add .
-git commit -m "Add leaving-soon workflow and reward points"
+git commit -m "Add leaving-soon workflow"
 git push
 ```
 
@@ -271,18 +261,8 @@ For each file, be able to say:
 
 Practice these yourself:
 
-### Change reward from 10 to 15 points
-In `app.py`, find:
-
-```python
-points = points + 10
-```
-
-Change `10` to `15`.
-
-### Add a 10-minute leaving option
-- Add button in `index.html`
-- Allow `10` in `app.py` validation
+### Show more bays on the street
+In `app.py`, change `BAY_COUNT`, then press "Reset demo".
 
 ### Change model depth
 In `ml/train_model.py`:
@@ -302,8 +282,8 @@ if availability >= 0.65:
 
 Change `0.65`.
 
-### Add another parking bay
-Add one dictionary to `DEMO_SPOTS` in `app.py`.
+### Make the map refresh faster
+In `static/js/app.js`, change `REFRESH_MS`.
 
 These are perfect code-review practice tasks.
 
@@ -313,7 +293,7 @@ These are perfect code-review practice tasks.
 
 Memorise the logic, not a script:
 
-> "The problem is that drivers only learn that a parking bay is available after it becomes empty. ParkPing adds an earlier community signal: a driver who is about to leave can ping the bay. Historical parking data gives context about how difficult parking is likely to be, while the live ping gives the user an action they can take immediately. Rewards encourage people to contribute those pings."
+> "The problem is that drivers only learn that a parking bay is available after it becomes empty. ParkPing adds an earlier community signal: a driver who is about to leave can ping the bay. Historical parking data gives context about how difficult parking is likely to be, while the live ping gives the user an action they can take immediately."
 
 ---
 

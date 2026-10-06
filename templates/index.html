@@ -2,148 +2,39 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ParkPing — Smart Parking Prototype</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>ParkPing</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-<div class="app-shell">
-    <aside class="sidebar">
-        <div>
-            <div class="brand">
-                <div class="brand-mark">P</div>
-                <div>
-                    <strong>ParkPing</strong>
-                    <span>George Town prototype</span>
-                </div>
-            </div>
-
-            <nav>
-                <button class="nav-item active">⌂ <span>Find parking</span></button>
-                <button class="nav-item">↗ <span>Activity</span></button>
-                <button class="nav-item">✦ <span>Rewards</span></button>
-            </nav>
+<div class="app">
+    <header>
+        <div class="logo">Park<span>Ping</span></div>
+        <div id="modeSwitch" class="mode-switch">
+            <button data-mode="look">I'm looking</button>
+            <button data-mode="leave">I'm leaving</button>
         </div>
+    </header>
 
-        <div class="profile-card">
-            <div class="avatar">S</div>
-            <div>
-                <strong>Demo Driver</strong>
-                <span id="pointsSidebar">120 ParkPoints</span>
-            </div>
-        </div>
-    </aside>
+    <!-- The street: a row of bays, the road, another row of bays. app.js fills the rows. -->
+    <section class="street">
+        <div id="topRow" class="bay-row"></div>
+        <div class="road"></div>
+        <div id="bottomRow" class="bay-row"></div>
+    </section>
+    <div id="legend" class="legend"></div>
 
-    <main>
-        <header>
-            <div>
-                <span class="eyebrow">MONDAY • PARKING ASSISTANT</span>
-                <h1>Find a spot before it opens.</h1>
-                <p>Live community pings + historical parking intelligence.</p>
-            </div>
-            <button id="openLeaveModal" class="primary-button">I'm leaving</button>
-        </header>
+    <!-- Changes with the mode and the bay you tapped. -->
+    <section id="sheet" class="card" aria-live="polite"></section>
 
-        <section class="stats-grid">
-            <div class="stat-card">
-                <span>Available now</span>
-                <strong id="availableCount">0</strong>
-                <small>demo bays nearby</small>
-            </div>
-            <div class="stat-card orange">
-                <span>Opening soon</span>
-                <strong id="leavingCount">0</strong>
-                <small>community-reported</small>
-            </div>
-            <div class="stat-card">
-                <span>Drivers helped</span>
-                <strong id="helpedCount">8</strong>
-                <small>your contribution</small>
-            </div>
-        </section>
+    <!-- How busy parking usually is, from the dataset. -->
+    <section id="outlook" class="card"></section>
 
-        <section class="workspace">
-            <div class="map-card">
-                <div class="map-toolbar">
-                    <div>
-                        <span class="eyebrow">LIVE PARKING VIEW</span>
-                        <h2>George Town</h2>
-                    </div>
-                    <div class="legend">
-                        <span><i class="dot available"></i>Available</span>
-                        <span><i class="dot leaving"></i>Leaving soon</span>
-                        <span><i class="dot occupied"></i>Occupied</span>
-                    </div>
-                </div>
-                <div id="map" class="fake-map">
-                    <div class="road road-a"></div>
-                    <div class="road road-b"></div>
-                    <div class="road road-c"></div>
-                    <span class="street-label label-a">Lebuh Chulia</span>
-                    <span class="street-label label-b">Lebuh Armenian</span>
-                    <span class="street-label label-c">Lebuh Carnarvon</span>
-                </div>
-            </div>
-
-            <div class="right-column">
-                <div class="panel">
-                    <div class="panel-heading">
-                        <div>
-                            <span class="eyebrow">BEST OPTIONS</span>
-                            <h2>Nearby parking</h2>
-                        </div>
-                    </div>
-                    <div id="spotList" class="spot-list"></div>
-                </div>
-
-                <div class="panel prediction-panel">
-                    <span class="eyebrow">HISTORICAL MODEL</span>
-                    <h2>Should I keep looking here?</h2>
-                    <p>Uses the trained dataset model to estimate current occupancy pressure.</p>
-                    <div class="prediction-inputs">
-                        <label>
-                            Hour
-                            <input id="predictionHour" type="number" min="0" max="23" value="17">
-                        </label>
-                        <label>
-                            Day (0=Mon)
-                            <input id="predictionDay" type="number" min="0" max="6" value="0">
-                        </label>
-                    </div>
-                    <button id="predictButton" class="secondary-button">Check parking outlook</button>
-                    <div id="predictionResult" class="prediction-result">
-                        Train the model first to activate this panel.
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
-</div>
-
-<div id="leaveModal" class="modal hidden">
-    <div class="modal-card">
-        <button id="closeLeaveModal" class="close-button">×</button>
-        <span class="eyebrow">HELP ANOTHER DRIVER</span>
-        <h2>I'm leaving my spot</h2>
-        <p>Your parking bay will appear orange to nearby drivers.</p>
-
-        <label class="field-label">Parking bay</label>
-        <select id="spotSelect"></select>
-
-        <label class="field-label">When are you leaving?</label>
-        <div class="time-options">
-            <button data-minutes="0">Now</button>
-            <button class="selected" data-minutes="3">3 min</button>
-            <button data-minutes="5">5 min</button>
-        </div>
-
-        <div class="reward-note">
-            <strong>+10 ParkPoints</strong>
-            <span>after the departure is confirmed</span>
-        </div>
-
-        <button id="sendPing" class="primary-button full">Ping my spot</button>
-    </div>
+    <footer>
+        <span>Demo street. Bays and the hourly pattern come from the Kaggle parking dataset, not live George Town data.</span>
+        <button id="resetButton" class="link-button">Reset demo</button>
+    </footer>
 </div>
 
 <script src="/static/js/app.js"></script>

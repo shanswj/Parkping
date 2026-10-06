@@ -1,5 +1,7 @@
 from flask import Flask, render_template, jsonify, request
+from functools import lru_cache
 from pathlib import Path
+import os
 import sqlite3
 import json
 import joblib
@@ -7,122 +9,126 @@ import pandas as pd
 
 app = Flask(__name__)
 BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
 DB_PATH = BASE_DIR / "parkping.db"
 MODEL_PATH = BASE_DIR / "model.joblib"
 MODEL_META_PATH = BASE_DIR / "model_meta.json"
 
-# Prototype parking bays. Coordinates are illustrative demo data, not official MBPP bay data.
-DEMO_SPOTS = [
-    {"id": "CHU-A17", "street": "Lebuh Chulia", "status": "occupied", "x": 24, "y": 38, "section": "Zone A"},
-    {"id": "CHU-A18", "street": "Lebuh Chulia", "status": "available", "x": 38, "y": 30, "section": "Zone A"},
-    {"id": "ARM-B04", "street": "Lebuh Armenian", "status": "occupied", "x": 60, "y": 58, "section": "Zone B"},
-    {"id": "CAR-C11", "street": "Lebuh Carnarvon", "status": "available", "x": 72, "y": 28, "section": "Zone C"},
-    {"id": "KIM-D02", "street": "Lebuh Kimberley", "status": "occupied", "x": 49, "y": 74, "section": "Zone D"},
-]
+BAY_COUNT = 12  # how many bays the demo street shows
+
+# Columns the app needs from the Kaggle CSV (names after clean_name()).
+SPOT_COL = "parking_spot_id"
+STATUS_COL = "occupancy_status"
+TIME_COL = "timestamp"
+
+
+def clean_name(name):
+    return str(name).strip().lower().replace(" ", "_").replace("/", "_").replace("-", "_")
+
+
+@lru_cache(maxsize=1)
+def load_history():
+    """
+    Read the Kaggle CSV once and keep only what the app needs.
+    Returns None when no CSV has been placed in data/ yet.
+    """
+    csv_files = sorted(DATA_DIR.glob("*.csv"))
+    if not csv_files:
+        return None
+
+    df = pd.read_csv(csv_files[0])
+    df.columns = [clean_name(c) for c in df.columns]
+    df[TIME_COL] = pd.to_datetime(df[TIME_COL], errors="coerce")
+    df = df.dropna(subset=[TIME_COL, SPOT_COL])
+    df["hour"] = df[TIME_COL].dt.hour
+    df["occupied"] = (df[STATUS_COL].astype(str).str.strip().str.lower() == "occupied").astype(int)
+    return df[[TIME_COL, SPOT_COL, "hour", "occupied"]]
+
 
 def connect_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def seed_bays(conn):
+    """Each bay starts as occupied or free according to its most recent reading in the dataset."""
+    df = load_history()
+    if df is None:
+        return
+    latest = df.sort_values(TIME_COL).groupby(SPOT_COL).tail(1).sort_values(SPOT_COL).head(BAY_COUNT)
+    for record in latest.itertuples(index=False):
+        status = "occupied" if record.occupied else "free"
+        conn.execute("INSERT INTO bays (id, status) VALUES (?, ?)", (int(getattr(record, SPOT_COL)), status))
+
+
 def init_db():
     conn = connect_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS pings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            spot_id TEXT NOT NULL,
-            minutes INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'leaving_soon',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_profile (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            points INTEGER NOT NULL DEFAULT 120,
-            helped_drivers INTEGER NOT NULL DEFAULT 8
-        )
-    """)
-    conn.execute("INSERT OR IGNORE INTO user_profile (id, points, helped_drivers) VALUES (1, 120, 8)")
+    conn.execute("CREATE TABLE IF NOT EXISTS bays (id INTEGER PRIMARY KEY, status TEXT NOT NULL)")
+    if conn.execute("SELECT COUNT(*) FROM bays").fetchone()[0] == 0:
+        seed_bays(conn)
     conn.commit()
     conn.close()
 
-def active_pings():
-    conn = connect_db()
-    rows = conn.execute("SELECT * FROM pings WHERE status = 'leaving_soon' ORDER BY created_at DESC").fetchall()
-    conn.close()
-    return {row["spot_id"]: dict(row) for row in rows}
 
-def get_spots():
-    pings = active_pings()
-    spots = []
-    for original in DEMO_SPOTS:
-        spot = dict(original)
-        if spot["id"] in pings:
-            spot["status"] = "leaving_soon"
-            spot["minutes"] = pings[spot["id"]]["minutes"]
-            spot["ping_id"] = pings[spot["id"]]["id"]
-        spots.append(spot)
-    return spots
+def set_status(bay_id, new_status, required_status, error_message):
+    """Change one bay, but only if it is currently in the state we expect."""
+    conn = connect_db()
+    changed = conn.execute(
+        "UPDATE bays SET status=? WHERE id=? AND status=?", (new_status, bay_id, required_status)
+    ).rowcount
+    conn.commit()
+    conn.close()
+    if not changed:
+        return jsonify({"error": error_message}), 409
+    return jsonify({"id": bay_id, "status": new_status})
+
 
 @app.route("/")
 def home():
     return render_template("index.html")
 
-@app.get("/api/spots")
-def api_spots():
-    return jsonify(get_spots())
 
-@app.get("/api/profile")
-def api_profile():
+@app.get("/api/bays")
+def api_bays():
     conn = connect_db()
-    row = conn.execute("SELECT points, helped_drivers FROM user_profile WHERE id = 1").fetchone()
+    rows = conn.execute("SELECT id, status FROM bays ORDER BY id").fetchall()
     conn.close()
-    return jsonify(dict(row))
+    return jsonify([dict(r) for r in rows])
 
-@app.post("/api/pings")
-def create_ping():
-    data = request.get_json(force=True)
-    spot_id = data.get("spot_id")
-    minutes = int(data.get("minutes", 3))
 
-    if spot_id not in {s["id"] for s in DEMO_SPOTS}:
-        return jsonify({"error": "Unknown parking spot"}), 400
-    if minutes not in (0, 3, 5):
-        return jsonify({"error": "Minutes must be 0, 3, or 5"}), 400
+@app.post("/api/bays/<int:bay_id>/leave")
+def leave_bay(bay_id):
+    """A driver presses "I'm leaving": the bay is free straight away."""
+    return set_status(bay_id, "free", "occupied", "That bay is already free")
 
+
+@app.post("/api/bays/<int:bay_id>/park")
+def park_in_bay(bay_id):
+    """A driver takes a free bay."""
+    return set_status(bay_id, "occupied", "free", "That bay is not free")
+
+
+@app.post("/api/reset")
+def reset_demo():
+    """Put every bay back to its starting state from the dataset."""
     conn = connect_db()
-    conn.execute("UPDATE pings SET status='expired' WHERE spot_id=? AND status='leaving_soon'", (spot_id,))
-    cursor = conn.execute(
-        "INSERT INTO pings (spot_id, minutes, status) VALUES (?, ?, 'leaving_soon')",
-        (spot_id, minutes),
-    )
+    conn.execute("DELETE FROM bays")
+    seed_bays(conn)
     conn.commit()
-    ping_id = cursor.lastrowid
     conn.close()
+    return jsonify({"message": "Bays reset from dataset"})
 
-    return jsonify({"message": "Ping created", "ping_id": ping_id}), 201
 
-@app.patch("/api/pings/<int:ping_id>/complete")
-def complete_ping(ping_id):
-    conn = connect_db()
-    row = conn.execute("SELECT * FROM pings WHERE id=?", (ping_id,)).fetchone()
-    if not row:
-        conn.close()
-        return jsonify({"error": "Ping not found"}), 404
+@app.get("/api/outlook")
+def api_outlook():
+    """How full parking usually is at each hour: share of dataset rows marked Occupied."""
+    df = load_history()
+    if df is None:
+        return jsonify([])
+    by_hour = df.groupby("hour")["occupied"].mean()
+    return jsonify([{"hour": int(hour), "occupied_pct": round(share * 100)} for hour, share in by_hour.items()])
 
-    if row["status"] != "completed":
-        conn.execute("UPDATE pings SET status='completed' WHERE id=?", (ping_id,))
-        conn.execute("""
-            UPDATE user_profile
-            SET points = points + 10,
-                helped_drivers = helped_drivers + 1
-            WHERE id = 1
-        """)
-        conn.commit()
-
-    conn.close()
-    return jsonify({"message": "Spot marked available. 10 points awarded."})
 
 @app.post("/api/predict")
 def predict():
@@ -166,6 +172,8 @@ def predict():
         "recommendation": recommendation
     })
 
+
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True)
+    # PORT lets the app move when 5000 is busy (e.g. MLflow UI also uses 5000).
+    app.run(debug=True, port=int(os.environ.get("PORT", 5000)))
