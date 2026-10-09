@@ -1,151 +1,255 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ParkPing — Smart Parking Prototype</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ParkPing</title>
+<style>
+ :root{
+    color-scheme:dark;
+    --bg:#091315; --card:#122427; --soft:#0d1c1f; --ink:#e5f0f1; --mute:#8fa8ac; --line:#233b40;
+    --accent:#3bb6c2; --on-accent:#06191c; --amber:#f2b441;
+    --free:#2fbf88; --on-free:#06251a; --taken:#2f464b; --taken-ink:#9bb2b6; --on-ink:#091315;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "Segoe UI",system-ui,sans-serif}
+  h1,h2,p{margin:0}
+  button{font:inherit;color:inherit;cursor:pointer}
+  .page{max-width:1280px;margin:0 auto;padding:20px 24px 32px;display:flex;flex-direction:column;gap:18px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  .logo{font-size:24px;font-weight:800;color:var(--accent)} .logo span{color:var(--amber)}
+  .pill{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:6px 14px;font-size:12px;font-weight:600;color:var(--mute)}
+  .layout{display:grid;grid-template-columns:300px 1fr 340px;gap:18px;align-items:start}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+  .label{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+  .tag{align-self:flex-start;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;padding:3px 8px;background:var(--soft);border:1px solid var(--line)}
+  .tag.model{background:var(--accent);border-color:var(--accent);color:#fff}
+  .tag.hist{border-color:var(--ink);color:#fff}
+  .hint{font-size:12px;color:var(--mute)}
+
+  /* choices */
+  .zones{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .days{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+  .choice{border:1.5px solid var(--line);background:var(--soft);border-radius:10px;padding:10px 0;font-weight:600}
+  .choice:hover{border-color:var(--accent)}
+  .choice.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .days .choice{padding:8px 0;font-size:12px}
+  .hourrow{display:flex;justify-content:space-between;align-items:baseline}
+  #hourText{font-family:Consolas,monospace;font-size:22px}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+
+  /* answer */
+  .answer{flex-direction:row;align-items:center;gap:28px;flex-wrap:wrap}
+  #big{font-size:84px;font-weight:800;letter-spacing:-.04em;line-height:1}
+  #big small{font-size:36px;color:var(--mute)}
+  .answer .txt{flex:1 1 260px;display:flex;flex-direction:column;gap:10px}
+  #sentence{color:var(--mute);font-weight:600}
+  #verdict{font-size:20px;font-weight:800}
+  .meter{height:10px;border-radius:5px;background:var(--soft);border:1px solid var(--line);overflow:hidden}
+  #meterFill{height:100%;background:var(--accent);width:0;transition:width .25s}
+
+  /* bays */
+  .bays{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+  .bay{height:64px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:700;background:var(--free);color:#fff}
+  .bay.taken{background:var(--taken);color:var(--taken-ink)}
+  .legend{display:flex;gap:18px;font-size:12px;color:var(--mute)}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+
+  /* history chart */
+  #histStat{font-size:28px;font-weight:800}
+  .bars{display:flex;align-items:flex-end;gap:3px;height:100px;border-bottom:1px solid var(--line)}
+  .bars div{flex:1;background:var(--taken);border-radius:2px 2px 0 0;cursor:pointer}
+  .bars div.on{background:var(--ink)}
+  .bars div:hover{background:var(--accent)}
+  .axis{display:flex;justify-content:space-between;font-size:11px;color:var(--mute);font-family:Consolas,monospace}
+
+  /* model card */
+  .cmp{display:grid;grid-template-columns:130px 1fr 52px;align-items:center;gap:8px;font-size:12px}
+  .cmp .track{height:8px;border-radius:4px;background:var(--soft);border:1px solid var(--line);overflow:hidden}
+  .cmp .track i{display:block;height:100%;background:var(--taken)}
+  .cmp.me .track i{background:var(--accent)}
+  .cmp b{font-family:Consolas,monospace;text-align:right;font-weight:600}
+  .muted{background:transparent;border-style:dashed}
+  footer{color:var(--mute);font-size:12px}
+  #error{color:#b3261e;font-weight:600}
+
+  @media (max-width:1100px){.layout{grid-template-columns:300px 1fr}.side{grid-column:1 / -1}}
+  @media (max-width:720px){.layout{grid-template-columns:1fr}#big{font-size:64px}}
+</style>
 </head>
 <body>
-<div class="app-shell">
-    <aside class="sidebar">
+<div class="page">
+
+  <header>
+    <div class="logo">Park<span>Ping</span></div>
+    <div class="pill">Estimate from past records &middot; George Town prototype</div>
+  </header>
+
+  <div class="layout">
+
+    <!-- 1. What the visitor chooses -->
+    <section class="card">
+      <h2>Plan your visit</h2>
+      <div class="label">Zone</div>
+      <div class="zones" id="zoneButtons"></div>
+      <div class="label">Day</div>
+      <div class="days" id="dayButtons"></div>
+      <div>
+        <div class="hourrow"><span class="label">Arrival hour</span><span id="hourText"></span></div>
+        <input id="hourSlider" type="range" min="0" max="23" value="14">
+      </div>
+      <p class="hint">The estimate updates when you change a choice.</p>
+    </section>
+
+    <!-- 2. The model's answer, drawn as bays -->
+    <div style="display:flex;flex-direction:column;gap:18px;min-width:0">
+      <section class="card answer" aria-live="polite">
         <div>
-            <div class="brand">
-                <div class="brand-mark">P</div>
-                <div>
-                    <strong>ParkPing</strong>
-                    <span>George Town prototype</span>
-                </div>
-            </div>
-
-            <nav>
-                <button class="nav-item active">⌂ <span>Find parking</span></button>
-                <button class="nav-item">↗ <span>Activity</span></button>
-                <button class="nav-item">✦ <span>Rewards</span></button>
-            </nav>
+          <span class="tag model">Model estimate</span>
+          <div id="big">--</div>
         </div>
-
-        <div class="profile-card">
-            <div class="avatar">S</div>
-            <div>
-                <strong>Demo Driver</strong>
-                <span id="pointsSidebar">120 ParkPoints</span>
-            </div>
+        <div class="txt">
+          <p id="sentence"></p>
+          <div id="verdict"></div>
+          <div class="meter"><div id="meterFill"></div></div>
+          <p class="hint">A rough estimate. It does not promise that a particular bay will be free.</p>
+          <p id="error"></p>
         </div>
-    </aside>
+      </section>
 
-    <main>
-        <header>
-            <div>
-                <span class="eyebrow">MONDAY • PARKING ASSISTANT</span>
-                <h1>Find a spot before it opens.</h1>
-                <p>Live community pings + historical parking intelligence.</p>
-            </div>
-            <button id="openLeaveModal" class="primary-button">I'm leaving</button>
-        </header>
-
-        <section class="stats-grid">
-            <div class="stat-card">
-                <span>Available now</span>
-                <strong id="availableCount">0</strong>
-                <small>demo bays nearby</small>
-            </div>
-            <div class="stat-card orange">
-                <span>Opening soon</span>
-                <strong id="leavingCount">0</strong>
-                <small>community-reported</small>
-            </div>
-            <div class="stat-card">
-                <span>Drivers helped</span>
-                <strong id="helpedCount">8</strong>
-                <small>your contribution</small>
-            </div>
-        </section>
-
-        <section class="workspace">
-            <div class="map-card">
-                <div class="map-toolbar">
-                    <div>
-                        <span class="eyebrow">LIVE PARKING VIEW</span>
-                        <h2>George Town</h2>
-                    </div>
-                    <div class="legend">
-                        <span><i class="dot available"></i>Available</span>
-                        <span><i class="dot leaving"></i>Leaving soon</span>
-                        <span><i class="dot occupied"></i>Occupied</span>
-                    </div>
-                </div>
-                <div id="map" class="fake-map">
-                    <div class="road road-a"></div>
-                    <div class="road road-b"></div>
-                    <div class="road road-c"></div>
-                    <span class="street-label label-a">Lebuh Chulia</span>
-                    <span class="street-label label-b">Lebuh Armenian</span>
-                    <span class="street-label label-c">Lebuh Carnarvon</span>
-                </div>
-            </div>
-
-            <div class="right-column">
-                <div class="panel">
-                    <div class="panel-heading">
-                        <div>
-                            <span class="eyebrow">BEST OPTIONS</span>
-                            <h2>Nearby parking</h2>
-                        </div>
-                    </div>
-                    <div id="spotList" class="spot-list"></div>
-                </div>
-
-                <div class="panel prediction-panel">
-                    <span class="eyebrow">HISTORICAL MODEL</span>
-                    <h2>Should I keep looking here?</h2>
-                    <p>Uses the trained dataset model to estimate current occupancy pressure.</p>
-                    <div class="prediction-inputs">
-                        <label>
-                            Hour
-                            <input id="predictionHour" type="number" min="0" max="23" value="17">
-                        </label>
-                        <label>
-                            Day (0=Mon)
-                            <input id="predictionDay" type="number" min="0" max="6" value="0">
-                        </label>
-                    </div>
-                    <button id="predictButton" class="secondary-button">Check parking outlook</button>
-                    <div id="predictionResult" class="prediction-result">
-                        Train the model first to activate this panel.
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
-</div>
-
-<div id="leaveModal" class="modal hidden">
-    <div class="modal-card">
-        <button id="closeLeaveModal" class="close-button">×</button>
-        <span class="eyebrow">HELP ANOTHER DRIVER</span>
-        <h2>I'm leaving my spot</h2>
-        <p>Your parking bay will appear orange to nearby drivers.</p>
-
-        <label class="field-label">Parking bay</label>
-        <select id="spotSelect"></select>
-
-        <label class="field-label">When are you leaving?</label>
-        <div class="time-options">
-            <button data-minutes="0">Now</button>
-            <button class="selected" data-minutes="3">3 min</button>
-            <button data-minutes="5">5 min</button>
+      <section class="card">
+        <span class="tag">Illustration of the estimate</span>
+        <h2 id="bayTitle"></h2>
+        <div class="bays" id="bays"></div>
+        <div class="legend">
+          <span><i style="background:var(--taken)"></i>Likely taken</span>
+          <span><i style="background:var(--free)"></i>Likely free</span>
         </div>
-
-        <div class="reward-note">
-            <strong>+10 ParkPoints</strong>
-            <span>after the departure is confirmed</span>
-        </div>
-
-        <button id="sendPing" class="primary-button full">Ping my spot</button>
+        <p class="hint">These 12 bays are drawn to show the percentage. They are not real bays.</p>
+      </section>
     </div>
+
+    <!-- 3. Evidence, kept in separate labelled cards -->
+    <aside class="side" style="display:flex;flex-direction:column;gap:18px;min-width:0">
+      <section class="card">
+        <span class="tag hist">History from the dataset</span>
+        <div id="histStat">--</div>
+        <p class="hint" id="histSub"></p>
+        <div class="bars" id="hourBars"></div>
+        <div class="axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+        <p class="hint">A plain count of past records marked occupied, by hour. Click a bar to jump to that hour.</p>
+      </section>
+
+      <section class="card">
+        <span class="tag model">How the model did</span>
+        <h2 style="font-size:16px">Decision tree, tested on newer records</h2>
+        <p class="hint">Learned from the oldest 800 records and tested on the newest 200.</p>
+        <div class="cmp"><span>Always guess "occupied"</span><span class="track"><i style="width:{{ lazy }}%"></i></span><b>{{ lazy }}%</b></div>
+        <div class="cmp me"><span>Decision tree</span><span class="track"><i style="width:{{ tree }}%"></i></span><b>{{ tree }}%</b></div>
+        <p class="hint">The tree is only a little better than guessing, and 200 records is a small test. Hour, day and zone show little pattern in this dataset, so read the percentage as a rough guide.</p>
+      </section>
+
+      <section class="card muted">
+        <span class="tag">Community updates</span>
+        <p class="hint">Not in this prototype. Driver reports would appear here as their own labelled layer.</p>
+      </section>
+    </aside>
+  </div>
+
+  <footer>Source: Kaggle "Smart Parking Management Dataset", 1,000 records, 2021 to 2024. Not live George Town data.</footer>
 </div>
 
-<script src="/static/js/app.js"></script>
+<script>
+  // ---- The three things the visitor chooses (starting values) ----
+  const ZONES = ["Zone A", "Zone B", "Zone C", "Zone D"];
+  const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  let zone = "Zone A";
+  let day = "Monday";
+  let hour = 14;
+
+  // The order bays fill up in. Fixed, so the picture does not jump around.
+  const FILL_ORDER = [3, 8, 0, 10, 5, 11, 2, 7, 4, 9, 1, 6];
+
+  const pad = n => String(n).padStart(2, "0");
+  const $ = id => document.getElementById(id);
+
+  // ---- Draw the buttons ----
+  function drawChoices() {
+    $("zoneButtons").innerHTML = ZONES.map(z =>
+      `<button class="choice ${z === zone ? "on" : ""}" data-zone="${z}">${z}</button>`).join("");
+    $("dayButtons").innerHTML = DAYS.map(d =>
+      `<button class="choice ${d === day ? "on" : ""}" data-day="${d}" title="${d}">${d.slice(0, 3)}</button>`).join("");
+    $("hourText").textContent = pad(hour) + ":00";
+    $("hourSlider").value = hour;
+  }
+
+  // ---- Draw 12 bays: the first `taken` ones in FILL_ORDER are shaded ----
+  function drawBays(taken) {
+    let html = "";
+    for (let i = 0; i < 12; i++) {
+      const isTaken = FILL_ORDER.indexOf(i) < taken;
+      html += `<div class="bay ${isTaken ? "taken" : ""}">${i + 1}</div>`;
+    }
+    $("bays").innerHTML = html;
+  }
+
+  // ---- Ask Flask for the estimate, then update the page ----
+  async function update() {
+    drawChoices();
+    $("error").textContent = "";
+    try {
+      const reply = await fetch("/api/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zone: zone, day: day, hour: hour })
+      });
+      const r = await reply.json();
+      if (!reply.ok) { $("error").textContent = r.error; return; }
+
+      $("big").innerHTML = r.chance + "<small>%</small>";
+      $("sentence").textContent = "chance a spot in " + zone + " is occupied on " + day + " at " + pad(hour) + ":00";
+      $("meterFill").style.width = r.chance + "%";
+      const free = 100 - r.chance;
+      $("verdict").textContent = free >= 65 ? "Good chance of finding parking"
+                               : free >= 40 ? "Moderate availability, allow extra time"
+                               : "High demand, try another zone or time";
+      $("bayTitle").textContent = zone + " · about " + r.bays_taken + " of 12 bays taken";
+      drawBays(r.bays_taken);
+      $("histStat").textContent = "Usually " + r.history_percent + "% full at " + pad(hour) + ":00";
+      $("histSub").textContent = r.history_occupied + " of " + r.history_total + " past records at this hour were occupied (all zones, all days).";
+      markHourBar();
+    } catch (e) {
+      $("error").textContent = "Could not reach the server. Is app.py running?";
+    }
+  }
+
+  // ---- History bar chart (24 bars from /api/history) ----
+  let hourPercents = [];
+  async function loadHourBars() {
+    const r = await (await fetch("/api/history")).json();
+    hourPercents = r.hours;
+    $("hourBars").innerHTML = hourPercents.map((p, h) =>
+      `<div data-hour="${h}" style="height:${p}%" title="${pad(h)}:00 - ${p}% occupied"></div>`).join("");
+    markHourBar();
+  }
+  function markHourBar() {
+    document.querySelectorAll("#hourBars div").forEach(b =>
+      b.classList.toggle("on", Number(b.dataset.hour) === hour));
+  }
+
+  // ---- Listen for clicks ----
+  document.addEventListener("click", e => {
+    const b = e.target.closest("[data-zone],[data-day],[data-hour]");
+    if (!b) return;
+    if (b.dataset.zone) zone = b.dataset.zone;
+    if (b.dataset.day) day = b.dataset.day;
+    if (b.dataset.hour !== undefined) hour = Number(b.dataset.hour);
+    update();
+  });
+  $("hourSlider").addEventListener("input", e => { hour = Number(e.target.value); update(); });
+
+  update();
+  loadHourBars();
+</script>
 </body>
 </html>
