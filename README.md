@@ -1,5 +1,7 @@
 # ParkPing
 
+https://www.kaggle.com/datasets/datasetengineer/smart-parking-management-dataset/data
+
 Estimates the chance a parking zone in George Town is occupied, for a chosen day and hour.
 Built for CU5 from the Kaggle "Smart Parking Management" dataset (1,000 records, 2021 to 2024).
 
