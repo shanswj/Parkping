@@ -1,0 +1,8 @@
+.venv/
+.git/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+*.ipynb
+*.pdf
+data/IIoT_Smart_Parking_Management.csv
